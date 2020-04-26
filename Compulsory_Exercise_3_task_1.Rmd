@@ -1,0 +1,126 @@
+---
+subtitle: "TMA4268 Statistical Learning V2020"
+title: "Compulsory exercise 3"
+author: "Johannes Voll Kolstø"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+ # html_document
+  pdf_document
+# Location of pandoc: "C:/Users/johan/.conda/envs/rstudio_NTNU/Library/Scripts/pandoc"
+# Code to run: Sys.setenv(RSTUDIO_PANDOC="C:/Users/johan/.conda/envs/rstudio_NTNU/Library/Scripts/pandoc")
+---
+  
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,message=FALSE,warning=FALSE,strip.white=TRUE,prompt=FALSE,
+                      cache=TRUE, size="scriptsize",fig.width=4, fig.height=3)
+```
+
+```{r rpackages,eval=TRUE,echo=FALSE}
+library(knitr)
+library(rmarkdown)
+library(ggplot2)
+library(ggfortify)
+library(MASS)
+library(dplyr)
+library(ISLR)
+library(keras)
+```
+# Problem 1
+
+## a)
+```{r task1a_load_data, eval=TRUE, echo=FALSE}
+set.seed(1)
+College$Private = as.numeric(College$Private)
+train.ind = sample(1:nrow(College), 0.5 * nrow(College))
+college.train = College[train.ind, ]
+college.test = College[-train.ind, ]
+```
+Here we perform feature-wise normalization to the predictors using the mean and stadard deviations of the training data.
+```{r task1a_code1, eval=TRUE, echo=TRUE}
+predict_cols = names(College)[-9]
+n_pred = length(predict_cols)
+
+college.train_predictors = scale(college.train[ , predict_cols], scale=T)  # Mean: 0, sd: 1.
+col_means_train <- attr(college.train_predictors, "scaled:center") 
+col_stddevs_train <- attr(college.train_predictors, "scaled:scale")
+
+# Use means and standard deviations from training set to normalize test set
+college.test_predictors  = scale(college.test[ , predict_cols], center=col_means_train, scale=col_stddevs_train)  
+```
+
+
+## b)
+Denoting the response `Outstate` by $y$ and the collection of all the predictor variables into one vector $x \in \mathbb{R}^{17}$, 
+the equation for the prediction of a neural network with 2 hidden layers with $64$ nodes each, along with a `Relu` activation function between all three layers looks like
+\[
+\hat{y} = \max[W_3(\max[W_2(\max[W_1x + b_1, 0]) + b_2, 0]) + b_3, 0].
+\]
+Here $W_i$ represents the collection of weights between each fully connected layer, and each $b_i$ the bias. The $\max(\cdot, \cdot)$ function in applied elementwise. Correspondingly the shapes of the weight matrices are $W_1 \in \mathbb{R}^{64\times 17},  W_2 \in \mathbb{R}^{64\times 64}$ and $W_3 \in \mathbb{R}^{1, 64}$, whilst the bias vectors have the shapes $b_1 \in \mathbb{R}^{64}, b_2 \in \mathbb{R}^{64},~ b_3 \in \mathbb{R}^{1}$.
+
+As the response variable is quantitative, and not qualitative, a probability-type activation function for the output does not make sense. Given that `Outstate` only attains positive values, a `Relu` activation function is chosen for the output activation function as well. (Possibly might choose the "identity" function?)
+
+## c)
+```{r task1c_code1, eval=TRUE, echo=TRUE, fig.width=10, fig.height=4}
+y_train = data.matrix(college.train[, "Outstate"])
+x_train = data.matrix(college.train_predictors)
+
+y_test = data.matrix(college.test[, "Outstate"])
+x_test = data.matrix(college.test_predictors)
+
+nn_model = keras_model_sequential()
+nn_model %>% 
+  layer_dense(units=64, activation='relu', input_shape=c(17)) %>%
+  layer_dense(units=64, activation='relu') %>%
+  layer_dense(units=1,  activation='relu')
+
+# summary(nn_model)
+nn_model %>% compile(
+  loss = 'mean_squared_error',
+  optimizer = "rmsprop",
+  metrics = c('mae')
+)
+
+# Set seed before performing stochastic gradient descent:
+set.seed(123)
+nn_history = nn_model %>% fit(x_train, y_train, epochs=300, batch_size=8, 
+                              validation_split=0.2, verbose=0)
+nn_test_predictions = nn_model %>% predict(x_test)
+nn_mse = sum((y_test - nn_test_predictions)^2)/length(y_test)
+
+# Plot development in mae over epochs for training and validation test set:
+plot(nn_history, metrics=c("mae", "val_mae"), smooth = F) + ggtitle("Fitted model")
+```
+
+In the above plot we see the mean absolute error decreases rapidly at first for both the training and vailidation data, before leveling off. What is slightly surprising is the fact that the mean absolute error starts out greater for the training data than the validation data, but towards the end of the training epochs we see that this pattern has reversed. This is to be expected as the model overfits to the training data.
+
+When we look at the MSE for the neural network model on the test data, we get $MSE_{nn}=$, `r round(nn_mse, 3)`. For comparison, the MSE of a subset selection method with BIC, the $MSE_{BIC}= 3.401\times 10^6$. And using the Lasso method with $\lambda$ chosen through CV, the $MSE_{Lasso} = 3.745\times 10^6$. The neural network MSE is the worst of the three, but it is also a relatively simple model, without any regularization techniques.
+
+## d)
+In this task we perform much the same neural network regression as above, but the two hidden layers of the neural network each have $40\%$ dropout rates, hopefully generalizing the neural network without too great a penalty in its bias. 
+```{r task1d_code1, eval=TRUE, echo=TRUE, fig.width=10, fig.height=4}
+nn_dropout_model = keras_model_sequential()
+nn_dropout_model %>% 
+  layer_dense(units=64, activation='relu', input_shape=c(17)) %>%
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units=64, activation='relu') %>%
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units=1,  activation='relu')
+
+nn_dropout_model %>% compile(
+  loss = 'mean_squared_error',
+  optimizer = "rmsprop",
+  metrics = c('mae')
+)
+
+# Set seed before performing stochastic gradient descent:
+set.seed(123)
+nn_dropout_history = nn_dropout_model %>% fit(x_train, y_train, epochs=300, batch_size=8, 
+                                              validation_split=0.2, verbose=0)
+
+# Plot development in mae over epochs for training and validation test set:
+# plot(nn_dropout_history, metrics =c("mae", "val_mae"), smooth = F) + ggtitle("Fitted model")
+nn_dropout_test_predictions = nn_dropout_model %>% predict(x_test)
+nn_dropout_mse = sum((y_test - nn_dropout_test_predictions)^2)/length(y_test)
+```
+For this model with a dropout of $40\%$ in the two hidden layers, we find an $MSE_{nn-dropout}$ of `r nn_dropout_mse`. This is only beaten by the subset selection method, and yet more training epochs might imrove performance even more. 

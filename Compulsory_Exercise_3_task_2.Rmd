@@ -1,0 +1,123 @@
+---
+subtitle: "TMA4268 Statistical Learning V2020"
+title: "Compulsory exercise 3"
+author: "Johannes Voll Kolstø"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+ # html_document
+  pdf_document
+  
+# Location of pandoc: "C:/Users/johan/.conda/envs/rstudio_NTNU/Library/Scripts/pandoc"
+# Code to run: Sys.setenv(RSTUDIO_PANDOC="C:/Users/johan/.conda/envs/rstudio_NTNU/Library/Scripts/pandoc")
+---
+  
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,message=FALSE,warning=FALSE,strip.white=TRUE,prompt=FALSE,
+                      cache=TRUE, size="scriptsize",fig.width=4, fig.height=3)
+```
+
+```{r rpackages,eval=TRUE,echo=FALSE}
+library(knitr)
+library(rmarkdown)
+library(ggplot2)
+library(ggfortify)
+library(MASS)
+library(dplyr)
+
+# New packages:
+library(car)
+```
+
+# Problem 2
+```{r task2_data_loading, eval=TRUE, echo=FALSE}
+id <- "1CA1RPRYqU9oTIaHfSroitnWrI6WpUeBw"  # google file ID
+d.corona <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", 
+                             id), header = T)
+d.corona$country = as.factor(d.corona$country)
+d.corona$sex = as.factor(d.corona$sex)
+```
+
+## a)
+Below is a set of tables summarizing the data in `d.corona`, with the deceased category encoded as $\{0: \text{person did not die of Covid-19},~ 1: \text{Person died of Covid-19}\}$ along columns.
+```{r task2_a, eval=TRUE, echo=FALSE}
+# Table of deceased versus country:
+table(d.corona$deceased, d.corona$country)
+# Table of deceased versus sex:
+table(d.corona$deceased, d.corona$sex)
+# Table of deceased versus sex and country:
+tri_table = xtabs(~ sex + deceased + country, data=d.corona)
+ftable(tri_table)
+``` 
+
+## b) 
+A model with `deceased` as a response variable to `sex`, `age` and `country` without interactions is fitted:
+```{r, eval=TRUE, echo=TRUE}
+corona_logmod = glm(deceased ~ sex + age + country, family=binomial(link='logit'), data=d.corona)
+coef(summary(corona_logmod))
+```
+i. False,$\quad$ ii. False,$\quad$ iii. True,$\quad$ iv. False.
+
+## c) 
+```{r, eval=TRUE, echo=TRUE, fig.width=8, fig.height=5}
+pred_df = data.frame(expand.grid(sex = c("male","female"), age = seq(20, 100, by=0.5), country=c("France", "indonesia", "japan", "Korea")))
+pred_df$prob_deceased = 1/(1 + exp(-predict.glm(corona_logmod, newdata=pred_df)))
+deceased_prob_plot = ggplot(data=pred_df, aes(x=age, y=prob_deceased, color=country, type=sex)) + 
+  geom_line(aes(linetype=sex, color=country), size=1.2) + theme(legend.position="right") + 
+  labs(title="Logistic model of death due to Covid-19", y="Predicted prob. of dying of Covid-19", x="Age") + 
+  theme_grey(base_size = 14)
+deceased_prob_plot
+```
+
+## d)
+
+**i**: In order to investigate if males generally have a higher probability to die of coronavirus than femals, I construct a logistic model only including `sex` as an explanatory variable for `deceased`. 
+```{r, eval=TRUE, echo=TRUE}
+c.sex_logmod = glm(deceased ~ sex, family=binomial(link='logit'), data=d.corona)
+c.sex_logmod_sum = summary(c.sex_logmod)
+coef(c.sex_logmod_sum)
+```
+From the model coefficient summary above we see that the sex-difference coefficient `sexmale` is significant at an $\alpha = 5\cdot 10^{-3}$ level and positive, indicating greater odds of dying for males than females. On this basis we reject the null hypotheis that males and females have the same probability to die of Covid-10, but these results must be taken with reservations though, as it is unclear how the data this model is based on was collected. 
+
+
+**ii**: To try and answer the question of age being a greater risk factor for males than for females, I construct a model with `deceased` as a response to `age` and `sex` with an interaction term.
+```{r, eval=FALSE, echo=FALSE}
+# CAN CUT: Might need to be cut from printing if report is too long.
+c.sex_age_logmod = glm(deceased ~ sex + age, family=binomial(link='logit'), data=d.corona)
+c.sex_age_logmod_sum = summary(c.sex_age_logmod)
+coef(c.sex_age_logmod_sum)
+vif(c.sex_age_logmod)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+c.sex_age_interaction_logmod = glm(deceased ~ sex * age, family=binomial(link='logit'), data=d.corona)
+c.sex_age_logmod_interaction_sum = summary(c.sex_age_interaction_logmod)
+coef(c.sex_age_logmod_interaction_sum)
+```
+It is clear from the coefficient summary above that the coefficeints `sexmale` and `sexmale:age` both are found to have non-significant coefficients. This means that we cannot reject the null hypothesis that age is an equal risk factor for males and females. Further, the fact that that the `sexmale` coefficient itself become non-significant when in the a model with the interaction term `sexmale:age`, as opposed to the significant coefficient for `sexmale` by itself found for the logistic model in b), might be explained by colinearity between the `sex` and `sex:age` variables resulting in a high variance-inflation-factor. To investigate this we perform a vif-analysis the model.
+```{r, eval=TRUE, echo=TRUE}
+vif(c.sex_age_interaction_logmod)
+```
+The above vif-analysis confirms ours suspicion that there is high colinearity present between `sex` and `sex:age`, degrading the estimate for coefficients of both variables when present in the same model.
+
+**iii**: Lastly, in order to try and answer whether or not age is a greater risk factor for the French population than the Korean population, a logistic model with `decease` as a response to `age` and country with interactions is fitted.
+```{r, eval=FALSE, echo=FALSE}
+# Can add if there is lots of room:
+c.country_age_logmod = glm(deceased ~ country + age, family=binomial(link='logit'), data=d.corona)
+c.country_age_logmod_sum = summary(c.country_age_logmod)
+# vif(c.country_age_logmod)
+# vif(c.country_age_interaction_logmod)
+```
+
+```{r, eval=TRUE, echo=TRUE}
+c.country_age_interaction_logmod = glm(deceased ~ country * age, family=binomial(link='logit'), data=d.corona)
+c.country_age_interaction_logmod_sum = summary(c.country_age_interaction_logmod)
+coef(c.country_age_interaction_logmod_sum)[c(1, 8), ]
+```
+The above coefficient summary shows that the `countryKora:age` coefficient, representing the difference in log-odds slope of age for Korea as opposed to France, is not significant with a p-value of $0.381$. Thus we cannot reject the null hypothesis that age is an equal risk factor for the French and Japanese population.
+
+## e)
+It is possible that the French data have been gathered from a different population than the other countries. In the sense that the French may have only tested patients admitted to the hospital, whilst the practice in other countries might have been to test more broadly. This could influence the proportion of people registered as a deceased in the data set, as those already admitted to hospital in France might be at greater risk of dying than a more representative general subset of the population.
+
+## f)
+i. True,$\quad$ ii. True,$\quad$ iii. False,$\quad$ iv. False.
